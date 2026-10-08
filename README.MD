@@ -660,7 +660,7 @@ Inspired by:
 ## Contact
 
 - Open an issue on GitHub
-- Maintainer: [your email]
+- Maintainer: blessingsblessedchongo@gmail.com
 
 ---
 
