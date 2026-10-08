@@ -1,0 +1,2 @@
+import { Prose } from '@/components/shared/prose'
+export default function P() { return <Prose title="Privacy policy"><p>We collect your account email and name, the metadata of documents you sign (title, hash, signature), and verification events (time, IP address, user agent).</p><h2>Your files</h2><p>Signed PDFs are returned to you. Verification compares a SHA-256 hash and does not require sharing the document with anyone else.</p><h2>Retention and deletion</h2><p>Audit logs are retained for the life of the institution. Contact us to delete your account.</p></Prose> }

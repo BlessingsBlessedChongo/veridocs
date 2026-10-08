@@ -1,0 +1,29 @@
+{
+  "name": "@veridocs/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "db:generate": "dotenv -e ../../.env -- prisma generate",
+    "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "db:push": "dotenv -e ../../.env -- prisma db push",
+    "db:validate": "dotenv -e ../../.env -- prisma validate",
+    "db:studio": "dotenv -e ../../.env -- prisma studio",
+    "db:format": "prisma format",
+    "db:seed": "dotenv -e ../../.env -- prisma db seed"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "@veridocs/crypto": "*"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^11.0.0",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.4.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

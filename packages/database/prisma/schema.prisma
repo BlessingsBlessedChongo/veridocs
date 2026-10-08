@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum DocumentStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum InstitutionVerificationStatus {
+  PENDING
+  DOMAIN_VERIFIED
+  MANUALLY_VERIFIED
+  REJECTED
+}
+
+enum InstitutionRole {
+  ADMIN
+  ISSUER
+  AUDITOR
+  VIEWER
+}
+
+enum InstitutionMemberStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum KeyPairStatus {
+  ACTIVE
+  ROTATED
+  REVOKED
+  COMPROMISED
+}
+
+model User {
+  id                String              @id @db.Uuid
+  email             String              @unique
+  emailVerified     Boolean             @default(false)
+  fullName          String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  createdInstitutions Institution[]     @relation("InstitutionCreatedBy")
+  memberships       InstitutionMember[] @relation("MembershipUser")
+  invitedMembers     InstitutionMember[] @relation("MembershipInvitedBy")
+  signedDocuments   Document[]          @relation("DocumentSignedBy")
+  auditLogs         AuditLog[]          @relation("AuditActor")
+
+  @@index([email])
+}
+
+model Institution {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  name               String
+  emailDomain        String                       @unique
+  verificationStatus InstitutionVerificationStatus @default(PENDING)
+  createdByUserId    String                       @db.Uuid
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  createdBy          User                         @relation("InstitutionCreatedBy", fields: [createdByUserId], references: [id])
+  members            InstitutionMember[]
+  documents          Document[]
+  keyPairs           KeyPair[]
+  auditLogs          AuditLog[]
+
+  @@index([createdByUserId])
+  @@index([emailDomain])
+}
+
+model InstitutionMember {
+  id               String                  @id @default(uuid()) @db.Uuid
+  userId           String                  @db.Uuid
+  institutionId    String                  @db.Uuid
+  role             InstitutionRole
+  invitedByUserId  String?                 @db.Uuid
+  status           InstitutionMemberStatus @default(PENDING)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  user             User                    @relation("MembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  institution      Institution             @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  invitedBy        User?                   @relation("MembershipInvitedBy", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, institutionId])
+  @@index([userId])
+  @@index([institutionId])
+}
+
+model KeyPair {
+  id                  String       @id @default(uuid()) @db.Uuid
+  institutionId       String       @db.Uuid
+  publicKey           String       @db.Text
+  encryptedPrivateKey String       @db.Text
+  algorithm           String       @default("RSA-2048")
+  status              KeyPairStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+  rotatedAt           DateTime?
+  revokedAt           DateTime?
+  institution         Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  documents           Document[]
+
+  @@index([institutionId])
+  @@index([status])
+}
+
+model Document {
+  id               String         @id @default(uuid())
+  documentId       String         @unique
+  title            String
+  description      String?
+  fileHash         String         @db.VarChar(64)
+  signature        String         @db.Text
+  institutionId    String         @db.Uuid
+  signedByUserId   String         @db.Uuid
+  keyPairId        String         @db.Uuid
+  institution      Institution    @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  signedByUser     User            @relation("DocumentSignedBy", fields: [signedByUserId], references: [id])
+  keyPair          KeyPair         @relation(fields: [keyPairId], references: [id])
+  qrCodeUrl        String?
+  status           DocumentStatus @default(ACTIVE)
+  issuedAt         DateTime       @default(now())
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  revocationReason String?
+  verifications    Verification[]
+  auditLogs        AuditLog[]
+
+  @@index([fileHash])
+  @@index([institutionId])
+  @@index([signedByUserId])
+  @@index([keyPairId])
+  @@index([status])
+}
+
+model Verification {
+  id            String   @id @default(uuid())
+  documentId    String
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  verifiedAt    DateTime @default(now())
+  result        String
+  ipAddress     String?
+  userAgent     String?
+  failureReason String?
+
+  @@index([documentId])
+  @@index([verifiedAt])
+}
+
+model AuditLog {
+  id           String       @id @default(uuid()) @db.Uuid
+  action       String
+  entityType   String
+  entityId     String
+  actorUserId  String       @db.Uuid
+  institutionId String      @db.Uuid
+  documentId   String?
+  actor        User         @relation("AuditActor", fields: [actorUserId], references: [id])
+  institution  Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  document     Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([actorUserId])
+  @@index([institutionId])
+}

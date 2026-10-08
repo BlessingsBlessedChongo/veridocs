@@ -1,0 +1,9 @@
+export const MAX_FILE_SIZE = 10 * 1024 * 1024;
+export const ALLOWED_MIME_TYPES = ['application/pdf'] as const;
+export const DEFAULT_PAGE = 1;
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 100;
+export const SIGN_RATE_LIMIT = 10;
+export const VERIFY_UPLOAD_RATE_LIMIT = 100;
+export const VERIFY_DOCUMENT_RATE_LIMIT = 300;
+export const INSTITUTION_REGISTER_RATE_LIMIT = 5;

@@ -1,0 +1,2 @@
+import { Prose } from '@/components/shared/prose'
+export default function P() { return <Prose title="About VeriDocs"><p>VeriDocs exists because a printed certificate or PDF is easy to forge and hard to check. We sign documents with RSA-2048 keys held by the issuing institution and embed a QR code so anyone can verify a document in seconds.</p><h2>Mission</h2><p>Make forgery detectable, for everyone, at no cost.</p><h2>Contact</h2><p>Questions or security reports: <code>support@veridocs.app</code></p></Prose> }

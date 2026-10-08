@@ -1,0 +1,2 @@
+import { Prose } from '@/components/shared/prose'
+export default function P() { return <Prose title="Terms of service"><p>By using VeriDocs you agree to sign only documents you are authorised to issue and to protect your account credentials.</p><h2>Issuer responsibility</h2><p>Institutions are responsible for the accuracy of documents they sign and for revoking documents issued in error.</p><h2>Availability</h2><p>The service is provided as is. Verification results reflect the cryptographic state of the document at the time of the check.</p></Prose> }
