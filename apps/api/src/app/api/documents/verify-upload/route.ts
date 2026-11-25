@@ -1,33 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@veridocs/database';
-import { hashBuffer, verifySignature } from '@veridocs/crypto';
-import { handleApiError } from '../../../../lib/errors';
+import { NextRequest } from 'next/server';
+import { hashBuffer } from '@veridocs/crypto';
 import { VERIFY_UPLOAD_RATE_LIMIT } from '@veridocs/shared';
-import { rateLimit } from '../../../../lib/rate-limit';
+import { clientIp, limit, ok, route } from '../../../../lib/http';
+import { readPdf } from '../../../../lib/signing';
+import { assess, findById, findByHash, present, record } from '../../../../lib/verify';
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+/**
+ * Public: check a PDF by uploading it (multipart/form-data: file; optional documentId to
+ * check it against one specific document). The file is hashed in memory and never stored.
+ */
+export const POST = route(async (request: NextRequest) => {
+  await limit(`verify-upload:${clientIp(request)}`, VERIFY_UPLOAD_RATE_LIMIT, '1m', 'Too many checks from this network. Wait a minute and try again.');
+  const form = await request.formData();
+  const fileHash = hashBuffer(await readPdf(form.get('file')));
+  const documentId = form.get('documentId');
 
-export async function POST(request: NextRequest) {
-  try {
-    const identifier = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-    const rate = await rateLimit(`verify-upload:${identifier}`, VERIFY_UPLOAD_RATE_LIMIT, '1m');
-    if (!rate.success) return NextResponse.json({ success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Rate limit exceeded' } }, { status: 429 });
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File) || file.size > MAX_FILE_SIZE || file.type !== 'application/pdf') {
-      return NextResponse.json({ success: false, error: 'A PDF file up to 10MB is required' }, { status: 400 });
-    }
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-    if (fileBuffer.subarray(0, 5).toString() !== '%PDF-') return NextResponse.json({ success: false, error: 'The uploaded file is not a valid PDF' }, { status: 400 });
-
-    const fileHash = hashBuffer(fileBuffer);
-    const document = await prisma.document.findFirst({ where: { fileHash }, include: { institution: true, keyPair: true } });
-    if (!document) return NextResponse.json({ success: true, valid: false, reason: 'Document not found in registry. It may have been altered or never registered.' });
-    if (!verifySignature(fileHash, document.signature, document.keyPair.publicKey)) return NextResponse.json({ success: true, valid: false, reason: 'Invalid signature. Document may be forged.' });
-    if (document.status !== 'ACTIVE') return NextResponse.json({ success: true, valid: false, documentId: document.documentId, title: document.title, issuer: document.institution.name, status: document.status, reason: `Document is ${document.status.toLowerCase()}` });
-    if (document.expiresAt && document.expiresAt < new Date()) return NextResponse.json({ success: true, valid: false, documentId: document.documentId, title: document.title, issuer: document.institution.name, status: 'EXPIRED', reason: 'Document has expired' });
-    return NextResponse.json({ success: true, valid: true, documentId: document.documentId, title: document.title, issuer: document.institution.name, issuedAt: document.issuedAt.toISOString(), status: 'ACTIVE' });
-  } catch (error) {
-    return handleApiError(error);
-  }
-}
+  const document = typeof documentId === 'string' && documentId ? await findById(documentId) : await findByHash(fileHash);
+  const outcome = document ? assess(document, fileHash) : 'NOT_FOUND';
+  await record(request, document, outcome, 'UPLOAD');
+  return ok({ ...present(document, outcome, 'UPLOAD'), checkedHash: fileHash });
+});

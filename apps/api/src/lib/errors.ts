@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { logger } from './logger';
 
 export class AppError extends Error {
   constructor(public readonly statusCode: number, public readonly code: string, message: string) {
@@ -33,6 +34,6 @@ export class RateLimitError extends AppError {
 
 export function handleApiError(error: unknown) {
   const appError = error instanceof AppError ? error : new AppError(500, 'INTERNAL_ERROR', 'Internal server error');
-  if (!(error instanceof AppError)) console.error(error);
+  if (!(error instanceof AppError)) logger.error({ err: error }, 'Unhandled API error');
   return NextResponse.json({ success: false, error: { code: appError.code, message: appError.message } }, { status: appError.statusCode });
 }

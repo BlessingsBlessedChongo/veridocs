@@ -1,46 +1,49 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { prisma } from '@veridocs/database';
-import { generateKeyPair, encryptPrivateKey } from '@veridocs/crypto';
+import { encryptPrivateKey, generateKeyPair, publicKeyFingerprint } from '@veridocs/crypto';
 import { institutionRegistrationSchema, InstitutionRole, INSTITUTION_REGISTER_RATE_LIMIT } from '@veridocs/shared';
-import { requireAuth } from '../../../../lib/auth/require-auth';
-import { ConflictError, ValidationError, handleApiError } from '../../../../lib/errors';
-import { rateLimit } from '../../../../lib/rate-limit';
+import { requirePerson, requireVerifiedEmail } from '../../../../lib/auth/require-auth';
+import { ConflictError } from '../../../../lib/errors';
+import { limit, ok, readJson, route } from '../../../../lib/http';
+import { masterKey } from '../../../../lib/config';
 
-export async function POST(request: NextRequest) {
-  try {
-    const user = await requireAuth(request);
-    const rate = await rateLimit(`institution-register:${user.id}`, INSTITUTION_REGISTER_RATE_LIMIT, '1h');
-    if (!rate.success) throw new ConflictError('Institution registration rate limit exceeded');
+export const POST = route(async (request: NextRequest) => {
+  const user = await requirePerson(request);
+  requireVerifiedEmail(user);
+  await limit(`institution-register:${user.id}`, INSTITUTION_REGISTER_RATE_LIMIT, '1h', 'You have created several institutions in the last hour. Try again later.');
+  const { name, emailDomain } = await readJson(request, institutionRegistrationSchema);
 
-    const validation = institutionRegistrationSchema.safeParse(await request.json());
-    if (!validation.success) throw new ValidationError(validation.error.errors[0].message);
-    const { name, emailDomain } = validation.data;
-    if (user.email.split('@')[1]?.toLowerCase() === emailDomain) {
-      // Domain verification is intentionally based on the verified Supabase email identity.
-    }
-
-    const existing = await prisma.institution.findUnique({ where: { emailDomain } });
-    if (existing) throw new ConflictError('An institution with this email domain already exists');
-    const masterKey = process.env.MASTER_ENCRYPTION_KEY;
-    if (!masterKey) throw new Error('MASTER_ENCRYPTION_KEY is not configured');
-    const { publicKey, privateKey } = generateKeyPair();
-    const institution = await prisma.$transaction(async (transaction) => {
-      const created = await transaction.institution.create({
-        data: {
-          name,
-          emailDomain,
-          verificationStatus: user.email.split('@')[1]?.toLowerCase() === emailDomain ? 'DOMAIN_VERIFIED' : 'PENDING',
-          createdByUserId: user.id,
-          members: { create: { userId: user.id, role: InstitutionRole.ADMIN, status: 'ACTIVE' } },
-          keyPairs: { create: { publicKey, encryptedPrivateKey: encryptPrivateKey(privateKey, masterKey), status: 'ACTIVE' } },
-        },
-        include: { keyPairs: true },
-      });
-      await transaction.auditLog.create({ data: { action: 'INSTITUTION_REGISTERED', entityType: 'Institution', entityId: created.id, actorUserId: user.id, institutionId: created.id } });
-      return created;
-    });
-    return NextResponse.json({ success: true, data: { id: institution.id, name: institution.name, emailDomain: institution.emailDomain, publicKey: institution.keyPairs[0].publicKey, createdAt: institution.createdAt } }, { status: 201 });
-  } catch (error) {
-    return handleApiError(error);
+  if (await prisma.institution.findUnique({ where: { emailDomain } })) {
+    throw new ConflictError('An institution with this email domain is already registered. Ask its administrator to invite you.');
   }
-}
+  const { publicKey, privateKey } = generateKeyPair();
+  // Someone whose own email is on the domain has shown control of it; others wait for review.
+  const ownsDomain = user.email.split('@')[1]?.toLowerCase() === emailDomain;
+  const institution = await prisma.$transaction(async (tx) => {
+    const created = await tx.institution.create({
+      data: {
+        name,
+        emailDomain,
+        verificationStatus: ownsDomain ? 'DOMAIN_VERIFIED' : 'PENDING',
+        createdByUserId: user.id,
+        members: { create: { userId: user.id, role: InstitutionRole.ADMIN, status: 'ACTIVE' } },
+        keyPairs: { create: { publicKey, encryptedPrivateKey: encryptPrivateKey(privateKey, masterKey()), status: 'ACTIVE' } },
+      },
+      include: { keyPairs: true },
+    });
+    await tx.auditLog.create({ data: { action: 'INSTITUTION_REGISTERED', entityType: 'Institution', entityId: created.id, actorUserId: user.id, institutionId: created.id, metadata: { name, emailDomain } } });
+    return created;
+  });
+  return ok(
+    {
+      id: institution.id,
+      name: institution.name,
+      emailDomain: institution.emailDomain,
+      verificationStatus: institution.verificationStatus,
+      publicKey: institution.keyPairs[0].publicKey,
+      keyFingerprint: publicKeyFingerprint(institution.keyPairs[0].publicKey),
+      createdAt: institution.createdAt,
+    },
+    201,
+  );
+});
