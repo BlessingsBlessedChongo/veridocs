@@ -11,7 +11,9 @@
     "db:validate": "dotenv -e ../../.env -- prisma validate",
     "db:studio": "dotenv -e ../../.env -- prisma studio",
     "db:format": "prisma format",
-    "db:seed": "dotenv -e ../../.env -- prisma db seed"
+    "db:seed": "dotenv -e ../../.env -- prisma db seed",
+    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.10.0",
@@ -21,7 +23,8 @@
     "dotenv-cli": "^11.0.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "pdf-lib": "^1.17.1"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
