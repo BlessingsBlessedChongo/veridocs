@@ -25,6 +25,7 @@ Make forgery detectable and verification instant.
 - [Why VeriDocs](#why-veridocs)
 - [Architecture](#architecture)
 - [Technology Stack](#technology-stack)
+- [Features](#features)
 - [Getting Started](#getting-started)
 - [Usage](#usage)
 - [API Reference](#api-reference)
@@ -169,91 +170,92 @@ Client → POST /api/documents/verify-upload
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Frontend | Next.js 14 (App Router) | Server components, SEO |
+| Frontend | Next.js 16 (App Router), React 19 | Web app |
 | Styling | Tailwind CSS | Utility-first CSS |
 | Icons | Lucide React | Consistent, accessible icons |
 | Animation | Framer Motion | Performant animations |
 | Backend | Next.js API Routes | Serverless endpoints |
-| Database | PostgreSQL (Supabase) | Managed, free-tier database |
+| Database | PostgreSQL | Local, Supabase, Neon or any host |
 | ORM | Prisma | Type-safe data access |
 | Cryptography | Node.js `crypto` + `node-forge` | SHA-256 hashing, RSA-2048 signing |
 | PDF | `pdf-lib` | Pure-JS PDF manipulation |
 | QR codes | `qrcode` | Server-side QR generation |
 | Validation | Zod | Runtime type validation |
-| Testing | Vitest + Playwright | Unit and end-to-end tests |
+| Auth | Built-in (scrypt, hashed sessions) or Supabase Auth | Switchable |
+| Testing | Vitest and an HTTP end-to-end suite | Unit and end-to-end tests |
 | CI/CD | GitHub Actions | Automated testing and deployment |
 | Hosting | Vercel | Free-tier hosting for both apps |
 
 ---
 
+## Features
+
+**For issuers** (registrars, land offices, hospitals)
+
+- **Sign one PDF or a whole class at once.** Batch signing takes up to 50 PDFs, fills titles and recipients from a CSV, and returns a ZIP with every signed file and a manifest of verification links.
+- **A stamp people can use without a phone.** The first page gets a QR code plus the issuer, the verification link and the document ID.
+- **Recipients on the record.** Name the person a document is about; whoever verifies it sees whose it is.
+- **Revoke with a reason.** Anyone who checks a revoked document is told it was withdrawn, and why.
+- **Teams and roles.** Administrators, issuers, auditors and viewers; email invitations; the last administrator can never be removed.
+- **Key rotation.** Replace the signing key at any time; documents signed with older keys stay valid.
+- **Analytics.** Documents by status, checks per day for 30 days, failed checks, the most-checked documents, recent activity.
+- **Audit trail and CSV export** of everything signed and every action taken.
+
+**For verifiers** (employers, banks, embassies)
+
+- **Three ways to check, no account needed:** scan the QR code (in the browser, or with the phone's camera app), paste the link or ID, or drop the PDF.
+- **The file never leaves your device.** Dropped PDFs are fingerprinted (SHA-256) in the browser; only the 64-character fingerprint is looked up.
+- **A clear verdict:** genuine, altered, not found, forged, revoked or expired, with the evidence (fingerprints, key) a step away and a printable receipt.
+
+**For developers**
+
+- **API keys** so student-records or land systems can sign documents directly.
+- **Signed webhooks** for `document.signed`, `document.revoked` and `document.verified` (HMAC-SHA256, with delivery history and test sends).
+- **A public registry per institution:** every public key it has used and its revocation list, itself signed, so documents can be checked offline.
+
+---
+
 ## Getting Started
-
-### Authentication and Authorization
-
-VeriDocs uses Supabase Auth for identity and mirrors authenticated users into the local `User` table. Institution membership grants one of `ADMIN`, `ISSUER`, `AUDITOR`, or `VIEWER` roles. Protected API routes require a Supabase bearer token; document verification remains public.
-
-Configure `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` alongside the database variables in `.env`. After migrations, seed a local demo institution with:
-
-```bash
-npm run db:seed
-```
-
-The seed creates `admin@unza.zm`, the University of Zambia institution, an active admin membership, and an encrypted active signing key.
 
 ### Prerequisites
 
-- **Node.js** 20+
-- **npm** 10+
-- **Git**
-- **OpenSSL** (to generate the encryption key)
-- A free **[Supabase](https://supabase.com)** account
+- **Node.js** 20 or later and **npm** 10
+- **PostgreSQL** 14 or later (local, or hosted such as Supabase or Neon)
 
-### Installation
-
-**1. Clone the repository**
+### 1. Install
 
 ```bash
-git clone https://github.com/yourusername/veridocs.git
+git clone https://github.com/BlessingsBlessedChongo/veridocs.git
 cd veridocs
-```
-
-**2. Install dependencies**
-
-```bash
 npm install
 ```
 
-**3. Create a Supabase project**
+### 2. Configure
 
-Create a project named `veridocs`, then copy the connection string from **Settings → Database**.
+Copy `.env.example` to `.env` at the repository root (the API, the web app and the database scripts all read this one file) and set:
 
-**4. Configure environment variables**
+| Variable | What it is |
+|---|---|
+| `DATABASE_URL`, `DIRECT_URL` | Your Postgres. The `veridocs` database is created by the first migration. |
+| `MASTER_ENCRYPTION_KEY` | 64 hex characters (`openssl rand -hex 32`). Encrypts every institution's private key. **Back it up; never commit it.** |
+| `AUTH_PROVIDER`, `NEXT_PUBLIC_AUTH_PROVIDER` | `local` (VeriDocs' own accounts, the default) or `supabase`. |
+| `SMTP_HOST` … `EMAIL_FROM` | Email for confirmations, password resets and invitations. Leave `SMTP_HOST` empty in development and emails are printed in the API terminal instead. |
+| `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` | Where the web app and the API run. |
+| `CORS_ORIGINS` | Optional: extra websites allowed to call the private API (comma-separated). |
+| `UPSTASH_REDIS_URL`, `UPSTASH_REDIS_TOKEN` | Optional: shared rate limits across several servers. |
 
-Create a `.env` file in the project root:
+**Sign-in: built-in or Supabase.** With `AUTH_PROVIDER=local`, VeriDocs keeps its own accounts: passwords hashed with scrypt, revocable sessions stored only as hashes, one-time email links for confirmation and resets, and a list of signed-in devices. To use Supabase Auth instead, set both provider variables to `supabase` and fill in `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`.
 
-```env
-DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
-MASTER_ENCRYPTION_KEY="your-64-character-hex-key"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-NEXT_PUBLIC_API_URL="http://localhost:3001"
-```
-
-Generate the master encryption key:
-
-```bash
-openssl rand -hex 32
-```
-
-> **Keep `MASTER_ENCRYPTION_KEY` secret and backed up.** It encrypts every issuer's private key. If it is lost, those keys cannot be recovered. Never commit `.env`.
-
-**5. Initialize the database**
+### 3. Create the database and demo data
 
 ```bash
-npm run db:generate
-npm run db:migrate
+npm run db:migrate   # applies the migrations (creates the database if needed)
+npm run db:seed      # optional: a demo university, its admin and three signed sample certificates
 ```
 
-**6. Start the development servers**
+The seed prints the demo administrator's password (or uses `SEED_ADMIN_PASSWORD`) and saves sample signed PDFs (valid, revoked, expired) to `demo-documents/`.
+
+### 4. Run
 
 ```bash
 npm run dev
@@ -262,185 +264,112 @@ npm run dev
 | App | URL |
 |---|---|
 | Web | http://localhost:3000 |
-| API | http://localhost:3001 |
-
-> The two apps must run on different ports. Set `"dev": "next dev -p 3001"` in `apps/api/package.json` if it isn't already.
+| API | http://localhost:3001 (`/api/health` shows the database, sign-in and key status) |
 
 ---
 
 ## Usage
 
-The examples below call the API on `localhost:3001`.
+### In the browser
 
-### Register an issuer
+1. **Create an account** at `/auth/signup` and confirm your email (in development, the link is printed in the API terminal).
+2. **Create your institution.** If your email is on its domain, it is verified at once.
+3. **Sign a document** (Documents → Sign a document) or a **batch**. The signed PDF downloads; give the recipient that exact file.
+4. **Check it** at `/verify`: drop the PDF, scan the QR code or paste the link. Change one byte of the file and the check says *altered*.
 
-```bash
-curl -X POST http://localhost:3001/api/issuers/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "University of Zambia",
-    "email": "registrar@unza.zm"
-  }'
-```
+### From another system (API keys)
 
-The response contains the issuer's ID and public key.
-
-### Sign a document
+Create a key under **API & webhooks**, then:
 
 ```bash
 curl -X POST http://localhost:3001/api/documents/sign \
+  -H "Authorization: Bearer vd_live_…" \
   -F "file=@certificate.pdf" \
-  -F "issuerEmail=registrar@unza.zm" \
-  -F 'metadata={"title":"Bachelor of Science in Computer Science","description":"Issued to Chanda Mwale"}' \
+  -F "institutionId=<institution id>" \
+  -F 'metadata={"title":"Bachelor of Science in Computer Science","recipientName":"Chanda Mwale"}' \
   -o signed-certificate.pdf
 ```
 
-The response is a signed PDF with an embedded QR code.
+The signed PDF is the response; its ID is in the `X-Document-Id` header.
 
-### Verify by ID
-
-```bash
-curl http://localhost:3001/api/documents/verify/{documentId}
-```
-
-```json
-{
-  "success": true,
-  "valid": true,
-  "documentId": "abc123",
-  "title": "Bachelor of Science in Computer Science",
-  "issuer": "University of Zambia",
-  "issuedAt": "2026-10-08T10:30:00.000Z",
-  "status": "ACTIVE"
-}
-```
-
-### Verify by upload
+### Verify
 
 ```bash
-curl -X POST http://localhost:3001/api/documents/verify-upload \
-  -F "file=@signed-certificate.pdf"
+# By ID (what the QR code opens)
+curl http://localhost:3001/api/documents/verify/<document id>
+
+# By fingerprint: the file never leaves your machine
+curl -X POST http://localhost:3001/api/documents/verify-hash \
+  -H "Content-Type: application/json" \
+  -d "{\"hash\":\"$(sha256sum signed-certificate.pdf | cut -d' ' -f1)\"}"
 ```
 
 ---
 
 ## API Reference
 
-### `POST /api/issuers/register`
+All responses are JSON `{ "success": true, "data": … }` or `{ "success": false, "error": { "code", "message" } }`, except signing (a PDF), batch signing (a ZIP) and export (a CSV). Private routes take `Authorization: Bearer <session token or API key>`. More detail is in [docs/api-reference.md](docs/api-reference.md).
 
-Registers a new issuer. Generates an RSA-2048 key pair and stores the encrypted private key.
+**Public (no sign-in)**
 
-**Body**
-
-```json
-{
-  "name": "string (2-200 chars)",
-  "email": "string (valid email)"
-}
-```
-
-**Response**
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "name": "string",
-    "email": "string",
-    "publicKey": "PEM-encoded public key",
-    "createdAt": "ISO 8601 timestamp"
-  }
-}
-```
-
-### `POST /api/documents/sign`
-
-Signs a PDF document.
-
-**Request:** `multipart/form-data`
-
-| Field | Type | Notes |
+| Method | Path | |
 |---|---|---|
-| `file` | PDF | Max 10 MB |
-| `issuerEmail` | string | Registered issuer's email |
-| `metadata` | JSON string | `title` (required), `description` and `expiresAt` (optional) |
+| GET | `/api/documents/verify/:documentId` | Check by ID |
+| POST | `/api/documents/verify-hash` | Check by SHA-256 fingerprint `{ hash, documentId? }` |
+| POST | `/api/documents/verify-upload` | Check by uploading the PDF (`file`, optional `documentId`) |
+| GET | `/api/public/institutions/:id` | Public keys and signed revocation list |
+| GET | `/api/health` | Service health |
 
-**Response:** the signed PDF with embedded QR code.
+Every check returns an `outcome`: `VALID`, `ALTERED`, `NOT_FOUND`, `FORGED`, `REVOKED` or `EXPIRED`, plus a plain-language `reason`.
 
-### `GET /api/documents/verify/:documentId`
+**Signed in** (`…` is `/api/institutions/:id`)
 
-Verifies a document by ID.
+| Area | Routes |
+|---|---|
+| Accounts (built-in sign-in) | `POST /api/auth/` `signup`, `login`, `logout`, `verify-email`, `resend-verification`, `forgot-password`, `reset-password`, `change-password`; `GET /api/auth/sessions`; `DELETE /api/auth/sessions/:id` |
+| You | `GET /api/me` (you, your institutions, your invitations), `PATCH /api/me` |
+| Institutions | `POST /api/institutions/register`, `GET`/`PATCH …`, `GET …/stats` |
+| Members | `GET …/members`, `POST …/members/invite`, `POST`/`DELETE …/members/accept`, `PATCH`/`DELETE …/members/:userId` |
+| Documents | `POST /api/documents/sign`, `POST /api/documents/sign-batch`, `GET /api/documents/:documentId`, `POST /api/documents/:documentId/revoke`, `GET …/documents`, `GET …/documents/export` |
+| Keys | `GET …/keys`, `POST /api/key-pairs/:id/rotate` |
+| Integrations | `GET`/`POST …/api-keys`, `DELETE /api/api-keys/:id`, `GET`/`POST …/webhooks`, `PATCH`/`DELETE /api/webhooks/:id`, `POST /api/webhooks/:id/test` |
+| Records | `GET …/audit-logs`, `GET …/verifications` |
 
-```json
-{
-  "success": true,
-  "valid": true,
-  "documentId": "string",
-  "title": "string",
-  "issuer": "string",
-  "issuedAt": "ISO 8601 timestamp",
-  "status": "ACTIVE | REVOKED | EXPIRED"
-}
+### Webhook signatures
+
+Each delivery carries `X-VeriDocs-Event` and `X-VeriDocs-Signature: t=<unix seconds>,v1=<hex>`, where `v1` is HMAC-SHA256 of `"<t>.<raw body>"` with the webhook's secret:
+
+```js
+const [, t, v1] = /t=(\d+),v1=([0-9a-f]+)/.exec(req.headers['x-veridocs-signature'])
+const expected = crypto.createHmac('sha256', process.env.VERIDOCS_WEBHOOK_SECRET).update(`${t}.${rawBody}`).digest('hex')
+const genuine = crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected)) && Date.now() / 1000 - Number(t) < 300
 ```
 
-### `POST /api/documents/verify-upload`
+### Offline verification
 
-Verifies a document by uploading its PDF.
-
-**Request:** `multipart/form-data` with `file` (PDF).
-**Response:** same shape as `GET /api/documents/verify/:documentId`.
-
-### `GET /api/health`
-
-```json
-{
-  "status": "healthy",
-  "timestamp": "ISO 8601 timestamp",
-  "services": {
-    "database": "connected",
-    "api": "running"
-  }
-}
-```
+`GET /api/public/institutions/:id` returns every key the institution has used (with validity dates) and its revoked document IDs, signed with its active key. With that cached, a document can be checked with no network: SHA-256 the PDF, verify the RSA-SHA256 signature over the hex fingerprint, and make sure the ID isn't revoked.
 
 ---
 
 ## Security Model
 
-VeriDocs is built around three properties.
-
 | Property | How it is achieved |
 |---|---|
-| **Integrity** | SHA-256 fingerprinting. Any modification changes the hash, and verification compares it to the stored value. |
-| **Authenticity** | RSA-2048 signatures verified against the issuer's public key. |
-| **Non-repudiation** | The signature is mathematically bound to the document hash and the issuer's key. |
+| **Integrity** | SHA-256 of the final signed PDF. Any change, even re-saving, changes the fingerprint. |
+| **Authenticity** | RSA-2048 (RSA-SHA256) signatures, re-verified against the institution's key on every check, so a tampered database record is caught as *forged*. |
+| **Accountability** | Every signing, revocation, role change, key rotation and API key is in the audit trail. |
 
-### Key management
+**Keys.** Private keys are encrypted with AES-256-GCM under `MASTER_ENCRYPTION_KEY` and decrypted only for the moment of signing. Rotation keeps old keys for checking older documents. *Trust note:* the server signs on the institution's behalf, so whoever holds both the database and the master key could sign as any institution. Use a managed key service in production; issuer-held hardware keys are on the roadmap.
 
-- Private keys are encrypted with **AES-256-GCM** before storage.
-- The encryption key lives in the `MASTER_ENCRYPTION_KEY` environment variable.
-- Revoked keys are checked on every verification.
-- **Production recommendation:** store keys in an HSM or a managed key service (AWS KMS, Google Cloud KMS, HashiCorp Vault).
+**Accounts.** scrypt password hashes; session tokens and email links stored only as SHA-256 hashes; one-time links (48 hours to confirm an email, 30 minutes for a password reset); resets and password changes sign out other devices; rate limits on sign-in per network and per account; password-reset requests never reveal whether an account exists. Signing, creating institutions, accepting invitations and creating API keys require a confirmed email.
 
-> **Trust note:** in the current design the server holds (encrypted) issuer private keys and signs on their behalf. Anyone who obtains both the database and the master key could sign as any issuer, which also weakens strict non-repudiation. Hardware-backed, issuer-held keys are on the [roadmap](#long-term) for this reason.
+**API keys** are shown once, stored hashed, scoped to one institution and role, and cannot manage people, keys or settings.
 
-### Revocation
+**Webhooks** are signed, time out after 5 seconds, never follow redirects, and in production refuse private and internal addresses (no SSRF).
 
-Issuers can revoke documents. Revoked documents fail verification with a clear reason, and the revocation is recorded in the audit trail.
+**Privacy.** Documents are never stored: only fingerprints, signatures and the metadata you enter. Browser checks send only the fingerprint. Recipient emails are never shown publicly. In the checks list, verifiers' addresses are shortened (`41.72.x.x`) and browsers summarised.
 
-### Audit trail
-
-Every action is logged with timestamp, IP address and user agent:
-
-- Issuer registrations
-- Document signings
-- Verifications (successful and failed)
-- Revocations and status changes
-
-### Privacy
-
-VeriDocs does not store documents. Only hashes, signatures and metadata are kept; the document stays with its holder.
+**HTTP.** Strict CORS on private routes (public verification is open to any site), `Content-Security-Policy: default-src 'none'` on the API, HSTS in production, `X-Frame-Options: DENY`, `nosniff`, and CSV exports guarded against formula injection.
 
 ---
 
@@ -449,60 +378,22 @@ VeriDocs does not store documents. Only hashes, signatures and metadata are kept
 ```
 veridocs/
 ├── apps/
-│   ├── api/
-│   │   ├── src/app/api/
-│   │   │   ├── issuers/register/route.ts
-│   │   │   ├── documents/sign/route.ts
-│   │   │   ├── documents/verify/[documentId]/route.ts
-│   │   │   ├── documents/verify-upload/route.ts
-│   │   │   └── health/route.ts
-│   │   ├── next.config.js
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   └── web/
-│       ├── src/app/
-│       │   ├── layout.tsx
-│       │   ├── page.tsx
-│       │   ├── globals.css
-│       │   ├── verify/
-│       │   │   ├── page.tsx
-│       │   │   └── [documentId]/page.tsx
-│       │   ├── register/page.tsx
-│       │   └── docs/page.tsx
-│       ├── tailwind.config.js
-│       ├── postcss.config.js
-│       ├── package.json
-│       └── tsconfig.json
+│   ├── api/                     Next.js route handlers (port 3001)
+│   │   ├── src/app/api/         auth, me, institutions, documents, public, keys, api-keys, webhooks, health
+│   │   ├── src/lib/             auth (local, Supabase, API keys), signing, verify, webhooks, email, rate limits
+│   │   ├── src/__tests__/       unit tests (Vitest)
+│   │   └── scripts/e2e.ts       end-to-end check of every flow against running servers
+│   └── web/                     Next.js app (port 3000)
+│       ├── app/verify/          public checks: file (hashed in the browser), QR scan, link or ID
+│       ├── app/dashboard/       institutions, overview, documents, batch, members, checks, audit, keys, API & webhooks, settings
+│       ├── app/auth/, app/account/
+│       ├── components/app/ui.tsx   the dashboard's shared building blocks
+│       └── lib/                 API client, provider-agnostic sign-in client, types
 ├── packages/
-│   ├── crypto/
-│   │   ├── src/
-│   │   │   ├── hash.ts
-│   │   │   ├── keys.ts
-│   │   │   ├── signing.ts
-│   │   │   ├── index.ts
-│   │   │   └── __tests__/crypto.test.ts
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   ├── database/
-│   │   ├── prisma/schema.prisma
-│   │   ├── src/index.ts
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   └── shared/
-│       ├── src/
-│       │   ├── validators.ts
-│       │   ├── types.ts
-│       │   └── index.ts
-│       ├── package.json
-│       └── tsconfig.json
-├── docs/
-│   ├── architecture.md
-│   ├── api-reference.md
-│   └── security.md
-├── .github/workflows/ci.yml
-├── turbo.json
-├── package.json
-└── README.md
+│   ├── crypto/                  SHA-256, RSA signing, AES-GCM key encryption, PDF stamping, key fingerprints
+│   ├── database/                Prisma schema, migrations, seed
+│   └── shared/                  Zod validators, constants, types
+└── .github/workflows/ci.yml     type-check, tests, migrations, schema drift, builds
 ```
 
 ---
@@ -510,99 +401,54 @@ veridocs/
 ## Testing
 
 ```bash
-# All tests
-npm test
-
-# Crypto package only
-cd packages/crypto && npm test
-
-# End-to-end
-npm run test:e2e
+npm test             # unit tests: crypto, passwords, verdicts, webhook signatures, SSRF guard, rate limits
+npm run typecheck    # TypeScript across every package
+npm run e2e --workspace=@veridocs/api   # with the API running: end-to-end checks across every flow
 ```
 
-The crypto suite covers:
+The end-to-end check creates a throwaway account and institution and covers sign-up and email confirmation, signing, every verification method, one-byte tampering, batch signing with a broken file, API keys (and that revoked ones stop working), signed webhook deliveries, revocation, the signed public registry, invitations, the last-administrator rule, search, CSV export, analytics and the audit trail.
 
-- Hash consistency (same input → same hash)
-- Hash uniqueness (different input → different hash)
-- Single-character change detection
-- Signature validity
-- Signature rejection on tampered data
-- Signature rejection on the wrong key
+CI runs type-checks, unit tests, migrations on a fresh Postgres, a schema-drift check and production builds on every push.
 
 ---
 
 ## Deployment
 
-VeriDocs is designed for Vercel's free tier, as two projects from one repository.
+Both apps deploy to any Node host (on Vercel, create one project with root `apps/api` and one with root `apps/web`). Set the same environment variables on both, with:
 
-### 1. Push to GitHub
-
-```bash
-git add .
-git commit -m "Initial VeriDocs deployment"
-git push origin main
-```
-
-### 2. Deploy the API
-
-1. In [Vercel](https://vercel.com), click **Add New Project** and select the repository.
-2. Set **Root Directory** to `apps/api`.
-3. Set **Build Command** to `cd ../.. && npm run build`.
-4. Leave **Output Directory** as the default (`.next`).
-5. Add environment variables: `DATABASE_URL`, `MASTER_ENCRYPTION_KEY`, `NEXT_PUBLIC_APP_URL`.
-6. Click **Deploy**.
-
-### 3. Deploy the web app
-
-1. Create a second Vercel project from the same repository.
-2. Set **Root Directory** to `apps/web`.
-3. Set **Build Command** to `cd ../.. && npm run build`.
-4. Leave **Output Directory** as the default (`.next`).
-5. Add environment variables: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` (the deployed API URL).
-6. Click **Deploy**.
-
-> **Serverless database tip:** on Vercel, use Supabase's pooled connection string (port `6543`, with `?pgbouncer=true`) for `DATABASE_URL` to avoid exhausting connections, and keep the direct connection for migrations.
->
-> **CORS:** because the web app and API are separate origins, allow the web app's origin in the API's CORS configuration.
-
-### Environment variables
-
-| Variable | Description | Where to get it |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | Supabase → Settings → Database |
-| `MASTER_ENCRYPTION_KEY` | 64-char hex key encrypting issuer private keys | `openssl rand -hex 32` |
-| `NEXT_PUBLIC_APP_URL` | Public URL of the web app | Vercel deployment URL |
-| `NEXT_PUBLIC_API_URL` | Public URL of the API | Vercel deployment URL |
+- `NEXT_PUBLIC_APP_URL` = the web app's public URL (it goes into every QR code, so settle it before signing real documents)
+- `NEXT_PUBLIC_API_URL` = the API's public URL
+- a production Postgres, then `npm run db:deploy` to apply migrations
+- real SMTP settings, so confirmation and reset emails are sent
 
 ---
 
 ## Roadmap
 
-### Near-term
+### Done
 
-- [ ] Offline verification with cached public keys
-- [ ] Batch verification via CSV or ZIP upload
-- [ ] Issuer dashboard with analytics
-- [ ] Revocation lists (CRL/OCSP)
+- [x] Built-in accounts alongside Supabase Auth
+- [x] Batch signing with CSV import
+- [x] Issuer dashboard with analytics
+- [x] Signed revocation lists and a public key registry (offline verification)
+- [x] Webhooks for signing, revocation and verification events
+- [x] Dark mode with system preference detection
+- [x] Verification without uploading the document
+
+### Next
+
+- [ ] W3C Verifiable Credentials export
 - [ ] Multi-signature documents for high-value records
-- [ ] Dark mode with system preference detection
+- [ ] Multi-language interface (English, Bemba, Nyanja, Tonga, Lozi)
+- [ ] SDKs (JavaScript, Python, Go) and a command-line offline verifier
+- [ ] A review queue for institutions whose domain is not yet confirmed
 
-### Mid-term
+### Later
 
-- [ ] W3C Verifiable Credentials support
-- [ ] Mobile apps (React Native)
-- [ ] Blockchain anchoring for immutable audit trails
-- [ ] Multi-language support (English, Bemba, Nyanja, Tonga, Lozi)
-- [ ] Webhooks for verification events
-- [ ] SDKs (JavaScript, Python, Go)
-
-### Long-term
-
-- [ ] Post-quantum cryptography (CRYSTALS-Dilithium)
-- [ ] Zero-knowledge proofs for selective disclosure
-- [ ] Hardware-backed keys (WebAuthn, YubiKey)
-- [ ] Integration with Zambia's National PKI
-- [ ] ISO 27001 alignment
+- [ ] Issuer-held, hardware-backed keys (WebAuthn, HSM, KMS)
+- [ ] Post-quantum signatures (ML-DSA / CRYSTALS-Dilithium)
+- [ ] Selective disclosure with zero-knowledge proofs
+- [ ] Integration with Zambia's National PKI; ISO 27001 alignment
 
 ---
 
@@ -613,7 +459,7 @@ git push origin main
 | Cost | High (licensing) | Variable (gas fees) | Government-funded | **Free** |
 | Tamper detection | File-level | Object-level | Cryptographic hash | **SHA-256 + RSA-2048 signature** |
 | Verification speed | Low latency | ~1.5s | Instant | **Instant via QR, ~1.5s via upload** |
-| Offline support | No | No | Yes (QR printouts) | **Planned** |
+| Offline support | No | No | Yes (QR printouts) | **Yes (signed key registry and revocation list)** |
 | Privacy | Varies | Public ledger | Centralized | **No document storage** |
 | Deployment complexity | High | High | Moderate | **Low** |
 | Standards | eIDAS, ZertES | W3C VC | National | **W3C VC (planned)** |

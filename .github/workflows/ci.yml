@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Type-check, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: veridocs
+          POSTGRES_PASSWORD: veridocs
+          POSTGRES_DB: veridocs
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U veridocs"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://veridocs:veridocs@localhost:5432/veridocs
+      DIRECT_URL: postgresql://veridocs:veridocs@localhost:5432/veridocs
+      # Test-only values: never used outside this job.
+      MASTER_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000001
+      AUTH_PROVIDER: local
+      NEXT_PUBLIC_AUTH_PROVIDER: local
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Generate the database client
+        run: npx prisma generate --schema packages/database/prisma/schema.prisma
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Apply migrations to a fresh database
+        run: npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+
+      - name: Check the schema matches the migrations
+        run: |
+          PGPASSWORD=veridocs psql -h localhost -U veridocs -d veridocs -c 'CREATE DATABASE veridocs_shadow'
+          npx prisma migrate diff             --from-migrations packages/database/prisma/migrations             --to-schema-datamodel packages/database/prisma/schema.prisma             --shadow-database-url postgresql://veridocs:veridocs@localhost:5432/veridocs_shadow             --exit-code
+
+      - name: Build the API
+        run: npm run build --workspace=@veridocs/api
+
+      - name: Build the web app
+        run: npm run build --workspace=@veridocs/web
