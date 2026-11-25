@@ -1,31 +1,112 @@
 'use client'
-import { use, useEffect, useState } from 'react'
+
+import * as React from 'react'
 import Link from 'next/link'
+import { Download, FileSignature, Files, Search } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
-import { field, primaryBtn } from '@/components/shared/shell'
-import type { DocumentRecord } from '@/lib/types'
+import { useInstitution } from '@/components/providers/institution-provider'
+import {
+  Button, buttonStyles, DocumentStatusPill, EmptyState, ErrorState, Input, Loading, PageHeader, Pagination, Select, Table, td, timeAgo, When, useLoad,
+} from '@/components/app/ui'
+import { api, saveBlob } from '@/lib/api'
 
-const tone = { ACTIVE: 'bg-emerald-50 text-emerald-700', REVOKED: 'bg-rose-50 text-rose-700', EXPIRED: 'bg-amber-50 text-amber-700' }
+const PAGE_SIZE = 20
 
-export default function Documents({ params }: { params: Promise<{ institutionId: string }> }) {
-  const { institutionId } = use(params)
-  const [items, setItems] = useState<DocumentRecord[] | null>(null)
-  const [page, setPage] = useState(1); const [total, setTotal] = useState(0)
-  const [search, setSearch] = useState(''); const [status, setStatus] = useState('')
-  useEffect(() => {
-    setItems(null)
-    api.listDocuments(institutionId, { page, pageSize: 20, search, status }).then((r) => { setItems(r.items); setTotal(r.total) }).catch((e) => { toast.error(e.message); setItems([]) })
-  }, [institutionId, page, search, status])
+export default function Documents() {
+  const { institution, can } = useInstitution()
+  const base = `/dashboard/${institution.id}`
+  const [search, setSearch] = React.useState('')
+  const [query, setQuery] = React.useState('')
+  const [status, setStatus] = React.useState('')
+  const [page, setPage] = React.useState(1)
+  const [exporting, setExporting] = React.useState(false)
+
+  // Search as you type, without a request per keystroke.
+  React.useEffect(() => {
+    const t = setTimeout(() => { setQuery(search.trim()); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const { data, error, loading, reload } = useLoad(
+    () => api.documents(institution.id, { page, pageSize: PAGE_SIZE, search: query, status }),
+    [institution.id, page, query, status],
+  )
+  const signer = can('ADMIN', 'ISSUER')
+  const filtered = Boolean(query || status)
+
+  async function exportCsv() {
+    setExporting(true)
+    try {
+      const { blob, fileName } = await api.exportDocuments(institution.id, { search: query, status })
+      saveBlob(blob, fileName)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between"><h1 className="text-3xl font-semibold tracking-tight">Documents</h1><Link href={`/dashboard/${institutionId}/documents/new`} className={primaryBtn}>Sign document</Link></div>
-      <div className="flex gap-2"><input aria-label="Search documents" placeholder="Search" className={field} value={search} onChange={(e) => { setPage(1); setSearch(e.target.value) }} />
-        <select aria-label="Status" className={`${field} max-w-40`} value={status} onChange={(e) => { setPage(1); setStatus(e.target.value) }}><option value="">All statuses</option><option>ACTIVE</option><option>REVOKED</option><option>EXPIRED</option></select></div>
-      {items === null ? <p role="status" className="text-sm text-slate-500">Loading...</p> : items.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">No documents yet. Sign your first document to see it here.</p> : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3">Title</th><th>Status</th><th>Issued</th><th>Verifications</th></tr></thead>
-          <tbody>{items.map((d) => <tr key={d.id} className="border-t border-slate-100"><td className="px-4 py-3 font-medium"><Link href={`/dashboard/${institutionId}/documents/${d.id}`} className="hover:text-indigo-600">{d.title}</Link></td><td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone[d.status]}`}>{d.status}</span></td><td>{new Date(d.issuedAt).toLocaleDateString()}</td><td>{d.verificationCount}</td></tr>)}</tbody></table></div>)}
-      {total > 20 && <div className="flex items-center gap-3 text-sm"><button disabled={page === 1} onClick={() => setPage(page - 1)} className="disabled:opacity-40">Previous</button><span>Page {page} of {Math.ceil(total / 20)}</span><button disabled={page * 20 >= total} onClick={() => setPage(page + 1)} className="disabled:opacity-40">Next</button></div>}
+    <div>
+      <PageHeader
+        title="Documents"
+        description="Everything your institution has signed. Search by title, recipient or document ID."
+        actions={
+          <>
+            {can('ADMIN', 'ISSUER', 'AUDITOR') && <Button variant="secondary" onClick={exportCsv} busy={exporting}><Download size={16} aria-hidden />Export CSV</Button>}
+            {signer && <Link href={`${base}/documents/batch`} className={buttonStyles.secondary}><Files size={16} aria-hidden />Sign a batch</Link>}
+            {signer && <Link href={`${base}/documents/new`} className={buttonStyles.primary}><FileSignature size={16} aria-hidden />Sign a document</Link>}
+          </>
+        }
+      />
+
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+        <div className="relative flex-1">
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden />
+          <Input aria-label="Search documents" placeholder="Search by title, recipient or ID" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <Select aria-label="Filter by status" className="sm:max-w-48" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="REVOKED">Revoked</option>
+          <option value="EXPIRED">Expired</option>
+        </Select>
+      </div>
+
+      {error ? (
+        <ErrorState message={error} onRetry={reload} />
+      ) : !data ? (
+        <Loading rows={6} />
+      ) : data.items.length === 0 ? (
+        filtered ? (
+          <EmptyState icon={<Search size={28} />} title="Nothing matches" action={<Button variant="secondary" onClick={() => { setSearch(''); setStatus('') }}>Clear filters</Button>}>Try a different word, or show all statuses.</EmptyState>
+        ) : (
+          <EmptyState icon={<FileSignature size={28} />} title="No documents yet" action={signer ? <Link href={`${base}/documents/new`} className={buttonStyles.primary}>Sign your first document</Link> : null}>
+            Signed documents appear here with their status and how often they have been checked.
+          </EmptyState>
+        )
+      ) : (
+        <div className={loading ? 'opacity-60 transition' : 'transition'}>
+          <Table head={['Document', 'Status', 'Issued', 'Checks', 'Signed by']}>
+            {data.items.map((d) => (
+              <tr key={d.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                <td className={td}>
+                  <Link href={`${base}/documents/${d.documentId}`} className="font-medium text-slate-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400">{d.title}</Link>
+                  <span className="block text-xs text-slate-500">{d.recipientName ?? <span className="font-mono">{d.documentId.slice(0, 8)}</span>}</span>
+                </td>
+                <td className={td}><DocumentStatusPill status={d.status} /></td>
+                <td className={td}><When date={d.issuedAt} /></td>
+                <td className={td}>
+                  <span className="tabular-nums">{d.verificationCount}</span>
+                  {d.lastVerifiedAt && <span className="block text-xs text-slate-500">last {timeAgo(d.lastVerifiedAt)}</span>}
+                </td>
+                <td className={`${td} max-w-48 truncate`}>{d.signedBy}</td>
+              </tr>
+            ))}
+          </Table>
+          <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
+        </div>
+      )}
     </div>
   )
 }

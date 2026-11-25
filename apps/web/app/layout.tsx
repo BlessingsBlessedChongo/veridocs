@@ -1,9 +1,10 @@
-import { Toaster } from 'sonner'
 import { Analytics } from '@vercel/analytics/next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { ThemeProvider } from '@/components/providers/theme-provider'
+import { SessionProvider } from '@/components/providers/session-provider'
+import { Toaster } from '@/components/providers/toaster'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 const jetbrains = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono' })
@@ -36,12 +37,13 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${jetbrains.variable} min-h-screen bg-neutral-50 text-neutral-900 antialiased`}>
+      <body className={`${inter.variable} ${jetbrains.variable} min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100`}>
         <ThemeProvider>
-          {children}
+          <SessionProvider>{children}</SessionProvider>
+          <Toaster />
         </ThemeProvider>
-        <Toaster position="bottom-right" richColors closeButton />
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {/* Vercel's analytics script exists only on Vercel; elsewhere it would 404. */}
+        {process.env.VERCEL === '1' && <Analytics />}
       </body>
     </html>
   )

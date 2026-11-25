@@ -4,10 +4,12 @@ import * as React from 'react'
 import { Moon, Sun, Monitor } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
+import { useMounted } from '@/hooks/use-logo-variant'
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
-  const current = theme ?? 'system'
+  // The saved choice is only known in the browser; until then show the default, matching the server.
+  const current = useMounted() ? theme ?? 'system' : 'system'
 
   return (
     <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">

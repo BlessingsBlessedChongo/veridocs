@@ -100,12 +100,12 @@ export default function Page() {
             <p className="mt-5 text-slate-600 dark:text-slate-300">A verifiable chain of custody for every important document, from issuance through final verification.</p>
           </div>
           <div className="mt-12 grid gap-4 sm:grid-cols-2">
-            {[
+            {([
               ['SHA-256', 'Unique fingerprints make alterations immediately visible.', Hash],
               ['RSA-2048', 'Industry-standard signatures prove who issued a document.', KeyRound],
               ['Instant revocation', 'Revoke compromised or outdated documents in one click.', ShieldCheck],
               ['Full audit trail', 'Every verification is recorded with a transparent timestamp.', FileSignature],
-            ].map(([title, text, Icon]) => (
+            ] as const).map(([title, text, Icon]) => (
               <div key={title} className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
                 <Icon className="h-5 w-5 text-indigo-600" aria-hidden="true" />
                 <h3 className="mt-5 text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>

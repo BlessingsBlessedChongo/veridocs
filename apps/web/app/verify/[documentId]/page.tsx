@@ -1,41 +1,88 @@
 'use client'
-import { use, useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { CircleCheck, CircleX, ShieldCheck, TriangleAlert } from 'lucide-react'
-import { CenterCard } from '@/components/shared/shell'
-import { api } from '@/lib/api'
+
+import * as React from 'react'
+import Link from 'next/link'
+import { useParams, useSearchParams } from 'next/navigation'
+import { ArrowLeft, Lock, ShieldCheck } from 'lucide-react'
+import { PublicLayout } from '@/components/shared/site-shell'
+import { FileDrop } from '@/components/shared/file-drop'
+import { ResultCard } from '@/components/verify/result-card'
+import { ErrorState, Panel } from '@/components/app/ui'
+import { api, sha256File } from '@/lib/api'
+import { recallCheck } from '@/lib/verify'
 import type { VerificationResult } from '@/lib/types'
-import { Logo } from '@/components/ui/logo'
 
-export default function Result({ params }: { params: Promise<{ documentId: string }> }) {
-  const { documentId } = use(params)
-  const upload = useSearchParams().get('source') === 'upload'
-  const [r, setR] = useState<VerificationResult | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  useEffect(() => {
-    if (upload) { const s = sessionStorage.getItem('veridocs:upload-result'); if (s) { setR(JSON.parse(s)); return } }
-    api.verifyById(documentId).then(setR).catch((e) => setErr(e.message))
-  }, [documentId, upload])
+function Result() {
+  const { documentId } = useParams<{ documentId: string }>()
+  const checkedFile = useSearchParams().get('checked') === 'file'
+  const [result, setResult] = React.useState<VerificationResult | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [file, setFile] = React.useState<File | null>(null)
+  const [matched, setMatched] = React.useState<boolean | null>(null)
+  const [checking, setChecking] = React.useState(false)
 
-  if (err) return <CenterCard><Box icon={<TriangleAlert size={64} className="text-amber-600" />} title="Could not verify" sub={err} /></CenterCard>
-  if (!r) return <CenterCard><div role="status" className="py-8 text-center"><ShieldCheck className="mx-auto animate-pulse text-indigo-600" size={32} aria-hidden /><p className="mt-4 font-mono text-sm text-slate-500">Verifying signature...</p></div></CenterCard>
-  const ok = r.valid && r.status === 'ACTIVE'
-  const inactive = r.status === 'REVOKED' || r.status === 'EXPIRED'
+  const load = React.useCallback(() => {
+    setError(null)
+    // A file was just checked on the previous page: show that answer rather than asking again.
+    const remembered = checkedFile ? recallCheck(documentId) : null
+    if (remembered) {
+      setResult(remembered)
+      setMatched(remembered.outcome !== 'ALTERED' && Boolean(remembered.checkedHash))
+      return
+    }
+    api.verifyById(documentId).then(setResult).catch((e) => setError(e.message))
+  }, [documentId, checkedFile])
+  // sessionStorage only exists in the browser, so the remembered result is read after mounting.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  React.useEffect(load, [load])
+
+  /** Compares the visitor's copy with what was signed. Only its fingerprint leaves the device. */
+  async function compare(f: File) {
+    setFile(f)
+    setChecking(true)
+    try {
+      const r = await api.verifyHash(await sha256File(f), documentId)
+      setResult(r)
+      setMatched(r.outcome !== 'ALTERED')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
   return (
-    <CenterCard>
-      <div className="mb-4 flex justify-end"><Logo size={24} variant="primary" aria-hidden /></div>
-      {ok ? <Box icon={<CircleCheck size={64} className="text-emerald-600" />} title="Document verified" sub="This document is authentic and has not been altered." />
-        : inactive ? <Box icon={<TriangleAlert size={64} className="animate-pulse text-amber-600" />} title="Document no longer valid" sub={r.reason ?? `This document has been ${r.status?.toLowerCase()}.`} />
-        : <Box icon={<CircleX size={64} className="text-rose-600" />} title="Verification failed" sub={r.reason ?? 'The document could not be matched to a valid signature.'} />}
-      {(r.documentId || r.title) && (
-        <dl className="mt-6 divide-y divide-slate-100 rounded-lg border border-slate-200 text-sm">
-          {([['Document ID', r.documentId, true], ['Issued by', r.issuer], ['Title', r.title], ['Issued at', r.issuedAt && new Date(r.issuedAt).toLocaleString()], ['Status', r.valid ? r.status : 'INVALID']] as const).map(([k, v, mono]) => v ? (
-            <div key={k} className="flex justify-between gap-4 px-4 py-3"><dt className="text-slate-500">{k}</dt><dd className={`text-right font-medium ${mono ? 'font-mono text-xs' : ''}`}>{v}</dd></div>) : null)}
-        </dl>)}
-      <p className="mt-6 text-center text-xs text-slate-500">{ok ? 'Verified using cryptographic signatures. No human judgment was involved.' : 'This document may have been tampered with. Do not trust it.'}</p>
-    </CenterCard>
+    <PublicLayout>
+      <div className="mx-auto max-w-2xl space-y-6 px-4 py-10 sm:py-14">
+        <Link href="/verify" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-indigo-600 print:hidden"><ArrowLeft size={14} aria-hidden />Check another document</Link>
+        {error ? (
+          <ErrorState message={error} onRetry={load} />
+        ) : !result ? (
+          <div role="status" className="flex flex-col items-center gap-3 py-20 text-sm text-slate-500">
+            <ShieldCheck size={36} className="animate-pulse text-indigo-600" aria-hidden />
+            Checking the signature…
+          </div>
+        ) : (
+          <>
+            <ResultCard result={result} fileName={file?.name} fileMatched={matched} />
+            {result.documentId && matched === null && result.outcome !== 'NOT_FOUND' && (
+              <Panel title="Do you have the PDF?" description="The QR code proves the document exists. To be sure your copy hasn't been edited, check the file itself." className="print:hidden">
+                <FileDrop file={file} onFiles={([f]) => void compare(f)} compact label="Drop your copy here, or click to choose" />
+                <p className="mt-3 flex items-start gap-2 text-xs text-slate-500"><Lock size={12} className="mt-0.5 shrink-0" aria-hidden />The file stays on your device. Only its fingerprint is compared.</p>
+                {checking && <p role="status" className="mt-2 text-sm text-indigo-600">Comparing…</p>}
+              </Panel>
+            )}
+          </>
+        )}
+      </div>
+    </PublicLayout>
   )
 }
-function Box({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
-  return <div className="text-center"><div className="flex justify-center" aria-hidden>{icon}</div><h1 className="mt-4 text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-2 text-slate-600">{sub}</p></div>
+
+export default function ResultPage() {
+  return (
+    <React.Suspense>
+      <Result />
+    </React.Suspense>
+  )
 }
