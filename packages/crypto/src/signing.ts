@@ -3,6 +3,9 @@ import QRCode from 'qrcode';
 import { hashBuffer } from './hash';
 import { signData, verifySignature } from './key';
 
+/** The PDF itself is the problem (damaged, password-protected), not the request. */
+export class PdfUnreadableError extends Error {}
+
 export interface SignDocumentOptions {
   pdfBuffer: Buffer;
   documentId: string;
@@ -38,7 +41,26 @@ export async function signDocument(
   });
   
   // Step 2: Embed QR code into PDF
-  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  let pdfDoc: PDFDocument;
+  try {
+    pdfDoc = await PDFDocument.load(pdfBuffer);
+  } catch (error) {
+    const encrypted = /encrypt/i.test(String(error));
+    throw new PdfUnreadableError(encrypted ? 'This PDF is password-protected. Remove the password, then sign it.' : 'This PDF could not be read. It may be damaged.');
+  }
+  // pdf-lib is lenient: a broken file can "load" with no page tree at all, and then even
+  // counting its pages throws. Anything wrong with the structure means it can't be signed.
+  let pageCount = 0;
+  let alreadySigned = false;
+  try {
+    pageCount = pdfDoc.getPageCount();
+    alreadySigned = pdfDoc.getProducer() === 'VeriDocs' || (pdfDoc.getKeywords() ?? '').split(/[\s,]+/).includes('veridocs');
+  } catch {
+    pageCount = 0;
+  }
+  if (pageCount === 0) throw new PdfUnreadableError('This PDF could not be read. It may be damaged or empty.');
+  // Signing VeriDocs' own output would stack a second stamp and QR code on the first.
+  if (alreadySigned) throw new PdfUnreadableError('This PDF has already been signed with VeriDocs. Sign the original document instead.');
   const pages = pdfDoc.getPages();
   const firstPage = pages[0];
   const { width, height } = firstPage.getSize();
@@ -50,30 +72,34 @@ export async function signDocument(
   );
   const qrImage = await pdfDoc.embedPng(qrImageBytes);
   
-  const qrSize = 80;
-  const margin = 30;
-  
-  firstPage.drawImage(qrImage, {
-    x: width - qrSize - margin,
-    y: margin,
-    width: qrSize,
-    height: qrSize,
-  });
-  
-  // Add verification text
+  // A small stamp in the bottom-right corner: the QR code, and beside it who issued the
+  // document, where to check it and its ID, so it can be verified even without a phone.
+  const qrSize = 72;
+  const margin = 24;
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  firstPage.drawText('Verify at:', {
-    x: width - qrSize - margin - 60,
-    y: margin + qrSize / 2 - 5,
-    size: 8,
-    font,
-    color: rgb(0.4, 0.4, 0.4),
-  });
-  
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const shortUrl = verificationUrl.replace(/^https?:\/\//, '');
+  const lines: Array<[string, typeof font, number]> = [
+    ['Verify this document', bold, 7.5],
+    [fit(`Issued by ${issuerName}`, font, 6.5, 190), font, 6.5],
+    [fit(shortUrl, font, 6.5, 190), font, 6.5],
+    [`ID ${documentId}`, font, 5.5],
+  ];
+  const textWidth = Math.max(...lines.map(([text, f, size]) => f.widthOfTextAtSize(text, size)));
+  const boxWidth = qrSize + 10 + textWidth + 14;
+  const boxX = width - margin - boxWidth;
+  firstPage.drawRectangle({ x: boxX, y: margin - 4, width: boxWidth, height: qrSize + 8, color: rgb(1, 1, 1), borderColor: rgb(0.82, 0.84, 0.9), borderWidth: 0.5 });
+  firstPage.drawImage(qrImage, { x: width - margin - qrSize - 4, y: margin, width: qrSize, height: qrSize });
+  let lineY = margin + qrSize - 14;
+  for (const [text, f, size] of lines) {
+    firstPage.drawText(text, { x: boxX + 8, y: lineY, size, font: f, color: f === bold ? rgb(0.19, 0.18, 0.5) : rgb(0.3, 0.33, 0.4) });
+    lineY -= size + 7;
+  }
+
   // Add document metadata
   pdfDoc.setTitle(`Signed Document - ${documentId}`);
   pdfDoc.setProducer('VeriDocs');
-  pdfDoc.setCreator(issuerName);
+  pdfDoc.setCreator(latin1(issuerName));
   pdfDoc.setSubject(`Document ID: ${documentId}`);
   pdfDoc.setKeywords(['veridocs', 'signed', documentId]);
   
@@ -90,6 +116,23 @@ export async function signDocument(
     signature,
     qrCodeDataUrl,
   };
+}
+
+/** The built-in PDF fonts only cover Latin-1: drop accents, then anything else they can't draw. */
+export function latin1(raw: string): string {
+  return raw
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+}
+
+/** Shortens text with an ellipsis until it fits the given width. */
+function fit(raw: string, font: { widthOfTextAtSize: (t: string, s: number) => number }, size: number, maxWidth: number): string {
+  const text = latin1(raw);
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let cut = text;
+  while (cut.length > 4 && font.widthOfTextAtSize(`${cut}…`, size) > maxWidth) cut = cut.slice(0, -1);
+  return `${cut}…`;
 }
 
 /**

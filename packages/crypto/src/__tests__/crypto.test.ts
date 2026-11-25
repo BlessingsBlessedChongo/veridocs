@@ -43,7 +43,7 @@ describe('Key Generation and Signing', () => {
   it('generates valid RSA key pairs', () => {
     const { publicKey, privateKey } = generateKeyPair();
     expect(publicKey).toContain('BEGIN PUBLIC KEY');
-    expect(privateKey).toContain('BEGIN RSA PRIVATE KEY');
+    expect(privateKey).toContain('BEGIN PRIVATE KEY'); // PKCS#8; keys stored as PKCS#1 by older versions still load
   });
 
   it('signs and verifies data', () => {

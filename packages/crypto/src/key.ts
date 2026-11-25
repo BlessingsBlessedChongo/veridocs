@@ -1,100 +1,84 @@
-import forge from 'node-forge';
+import {
+  createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify,
+} from 'crypto';
 
+/**
+ * Keys, signatures and key encryption, on Node's built-in crypto (OpenSSL).
+ *
+ * Formats are unchanged from the earlier node-forge implementation, so existing keys,
+ * signatures and encrypted private keys keep working (see __tests__/compat.test.ts):
+ *   - signatures: RSASSA-PKCS1-v1_5 with SHA-256 over the UTF-8 text, base64
+ *   - encrypted keys: base64(iv[12] || tag[16] || AES-256-GCM ciphertext)
+ *   - fingerprints: SHA-256 of the SubjectPublicKeyInfo DER, first 16 bytes, colon hex
+ */
 export interface KeyPair {
   publicKey: string;
   privateKey: string;
 }
 
-function normalizeMasterKey(masterKey: string): string {
-  const key = /^[0-9a-f]{64}$/i.test(masterKey) ? forge.util.hexToBytes(masterKey) : masterKey;
-  if (key.length !== 32) throw new Error('MASTER_ENCRYPTION_KEY must be 32 bytes or 64 hexadecimal characters');
-  return key;
+const IV_LENGTH = 12;
+const TAG_LENGTH = 16;
+
+function masterKeyBytes(masterKey: string): Buffer {
+  if (/^[0-9a-f]{64}$/i.test(masterKey)) return Buffer.from(masterKey, 'hex');
+  const raw = Buffer.from(masterKey, 'latin1');
+  if (raw.length !== 32) throw new Error('MASTER_ENCRYPTION_KEY must be 32 bytes or 64 hexadecimal characters');
+  return raw;
 }
 
-/**
- * Generates an RSA-2048 key pair for document signing.
- * In production, private keys should be stored in an HSM.
- */
+/** A new RSA-2048 key pair (public: SPKI PEM, private: PKCS#8 PEM). In production, prefer an HSM or KMS. */
 export function generateKeyPair(): KeyPair {
-  const keypair = forge.pki.rsa.generateKeyPair({ bits: 2048 });
-  
-  return {
-    publicKey: forge.pki.publicKeyToPem(keypair.publicKey),
-    privateKey: forge.pki.privateKeyToPem(keypair.privateKey),
-  };
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicExponent: 0x10001,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+  return { publicKey, privateKey };
 }
 
-/**
- * Signs data with a private key using RSA-SHA256.
- */
+/** Signs text with RSA-SHA256 (PKCS#1 v1.5); returns base64. */
 export function signData(data: string, privateKeyPem: string): string {
-  const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
-  const md = forge.md.sha256.create();
-  md.update(data, 'utf8');
-  
-  const signature = privateKey.sign(md);
-  return forge.util.encode64(signature);
+  return sign('sha256', Buffer.from(data, 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
 }
 
-/**
- * Verifies a signature against data using a public key.
- */
-export function verifySignature(
-  data: string,
-  signature: string,
-  publicKeyPem: string
-): boolean {
+/** True only if the signature is a valid RSA-SHA256 signature of this text by this key. */
+export function verifySignature(data: string, signature: string, publicKeyPem: string): boolean {
   try {
-    const publicKey = forge.pki.publicKeyFromPem(publicKeyPem);
-    const md = forge.md.sha256.create();
-    md.update(data, 'utf8');
-    
-    const signatureBytes = forge.util.decode64(signature);
-    return publicKey.verify(md.digest().bytes(), signatureBytes);
+    const bytes = Buffer.from(signature, 'base64');
+    if (bytes.length === 0 || bytes.toString('base64') !== signature.replace(/\s+/g, '')) return false; // canonical base64 only
+    return verify('sha256', Buffer.from(data, 'utf8'), createPublicKey(publicKeyPem), bytes);
   } catch {
     return false;
   }
 }
 
-/**
- * Encrypts a private key using AES-256-GCM.
- * In production, use a dedicated KMS.
- */
-export function encryptPrivateKey(
-  privateKey: string,
-  masterKey: string
-): string {
-  const iv = forge.random.getBytesSync(12);
-  const cipher = forge.cipher.createCipher('AES-GCM', normalizeMasterKey(masterKey));
-  cipher.start({ iv });
-  cipher.update(forge.util.createBuffer(privateKey, 'utf8'));
-  cipher.finish();
-  
-  const encrypted = cipher.output.getBytes();
-  const tag = cipher.mode.tag.getBytes();
-  
-  return forge.util.encode64(iv + tag + encrypted);
+/** Encrypts a private key with AES-256-GCM under the master key. In production, use a KMS. */
+export function encryptPrivateKey(privateKey: string, masterKey: string): string {
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv('aes-256-gcm', masterKeyBytes(masterKey), iv, { authTagLength: TAG_LENGTH });
+  const encrypted = Buffer.concat([cipher.update(privateKey, 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
+}
+
+/** Decrypts a private key; throws if it was tampered with or the master key is wrong. */
+export function decryptPrivateKey(encryptedKey: string, masterKey: string): string {
+  const raw = Buffer.from(encryptedKey, 'base64');
+  if (raw.length <= IV_LENGTH + TAG_LENGTH) throw new Error('Failed to decrypt private key');
+  const decipher = createDecipheriv('aes-256-gcm', masterKeyBytes(masterKey), raw.subarray(0, IV_LENGTH), { authTagLength: TAG_LENGTH });
+  decipher.setAuthTag(raw.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH));
+  try {
+    return Buffer.concat([decipher.update(raw.subarray(IV_LENGTH + TAG_LENGTH)), decipher.final()]).toString('utf8');
+  } catch {
+    throw new Error('Failed to decrypt private key');
+  }
 }
 
 /**
- * Decrypts a private key.
+ * A short, stable fingerprint of a public key: SHA-256 of its DER encoding, shown as
+ * colon-separated hex (first 16 bytes). People compare these to be sure which key signed.
  */
-export function decryptPrivateKey(
-  encryptedKey: string,
-  masterKey: string
-): string {
-  const decoded = forge.util.decode64(encryptedKey);
-  const iv = decoded.slice(0, 12);
-  const tag = decoded.slice(12, 28);
-  const encrypted = decoded.slice(28);
-  
-  const decipher = forge.cipher.createDecipher('AES-GCM', normalizeMasterKey(masterKey));
-  decipher.start({ iv, tag: forge.util.createBuffer(tag) });
-  decipher.update(forge.util.createBuffer(encrypted));
-  
-  if (!decipher.finish()) {
-    throw new Error('Failed to decrypt private key');
-  }
-  
-  return decipher.output.toString();
+export function publicKeyFingerprint(publicKeyPem: string): string {
+  const der = createPublicKey(publicKeyPem).export({ type: 'spki', format: 'der' });
+  return createHash('sha256').update(der).digest('hex').slice(0, 32).match(/../g)!.join(':').toUpperCase();
 }
