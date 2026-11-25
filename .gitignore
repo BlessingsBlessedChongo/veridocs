@@ -50,3 +50,8 @@ Thumbs.db
 .cache/
 .temp/
 .tmp/
+# Sample PDFs written by the seed script
+demo-documents/
+
+# TypeScript build caches
+*.tsbuildinfo
