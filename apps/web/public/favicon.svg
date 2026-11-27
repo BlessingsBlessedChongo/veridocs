@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="32" height="32" fill="none">
-  <path d="M60 8 92 20v28c0 25-12 44-32 60C40 92 28 73 28 48V20L60 8Z" fill="#4F46E5" stroke="#EEF2FF" stroke-width="4" stroke-linejoin="round"/>
-  <path d="M41 34c0-6 5-10 11-10h16c6 0 11 4 11 10v10c0 6-5 11-11 11h-8v18h-8V55h-8c-6 0-11-5-11-11V34h8Z" fill="#fff" opacity=".92"/>
-  <path d="M40 48c7 6 13 10 20 10s13-4 20-10v28c-7 6-13 10-20 10s-13-4-20-10V48Z" fill="#fff" opacity=".9"/>
-  <circle cx="60" cy="55" r="11" fill="#4F46E5" stroke="#EEF2FF" stroke-width="4"/>
-  <path d="M60 50v8m-5-4h10" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="32" height="32" fill="none"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366F1"/><stop offset="1" stop-color="#4338CA"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="url(#g)"/><path d="M40 22H69L90 43V92a7 7 0 0 1-7 7H40a7 7 0 0 1-7-7V29a7 7 0 0 1 7-7Z" fill="#fff"/><path d="M69 22V36a7 7 0 0 0 7 7H90Z" fill="#C7D2FE"/><path d="M46 63L58 77L78 52" fill="none" stroke="#4338CA" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></svg>

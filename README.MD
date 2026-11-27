@@ -18,6 +18,8 @@ Make forgery detectable and verification instant.
 
 ---
 
+**Try it live: <https://veridocs-blue.vercel.app/verify>** and press one of the four sample certificates (genuine, revoked, expired, tampered). The API runs at <https://veridocs-api.vercel.app/api/health>.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -420,6 +422,8 @@ Both apps deploy to any Node host (on Vercel, create one project with root `apps
 - `NEXT_PUBLIC_API_URL` = the API's public URL
 - a production Postgres, then `npm run db:deploy` to apply migrations
 - real SMTP settings, so confirmation and reset emails are sent
+
+The hosted copy runs this way: two Vercel projects (the API pinned to Frankfurt in `apps/api/vercel.json`, next to its database) and a Neon PostgreSQL. Vercel's free plan limits an upload to about 4.5 MB.
 
 ---
 

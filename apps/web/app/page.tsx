@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowRight, BadgeCheck, FileSignature, Hash, KeyRound, QrCode, ShieldCheck, Sparkles, Fingerprint } from 'lucide-react'
 import { PublicLayout } from '@/components/shared/site-shell'
 import { Logo } from '@/components/ui/logo'
+import { TourVideo } from '@/components/shared/tour-video'
 
 const features = [
   { icon: Fingerprint, title: 'Tamper-evident', text: 'Every document gets a SHA-256 fingerprint. Change one character, and verification fails.' },
@@ -91,6 +92,12 @@ export default function Page() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section className="mx-auto max-w-4xl px-4 pt-20 sm:px-6 lg:px-8">
+          <h2 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white sm:text-4xl">See it in one minute.</h2>
+          <p className="mb-8 mt-4 max-w-2xl text-slate-600 dark:text-slate-300">A document is signed, checked, tampered with and withdrawn, on this very site.</p>
+          <TourVideo />
         </section>
 
         <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:px-8">

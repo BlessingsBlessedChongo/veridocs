@@ -20,6 +20,13 @@ const TABS: Array<[Tab, string, React.ComponentType<{ size?: number; 'aria-hidde
   ['id', 'Enter the link or ID', TextCursorInput],
 ]
 
+const SAMPLES = [
+  { label: 'A genuine certificate', file: 'valid-chanda-mwale.pdf', tamper: false },
+  { label: 'A revoked one', file: 'revoked-mutale-banda.pdf', tamper: false },
+  { label: 'An expired one', file: 'expired-natasha-phiri.pdf', tamper: false },
+  { label: 'A tampered copy', file: 'valid-chanda-mwale.pdf', tamper: true },
+] as const
+
 function Verify() {
   const router = useRouter()
   const initial = (useSearchParams().get('tab') as Tab) || 'file'
@@ -47,6 +54,24 @@ function Verify() {
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      setBusy(false)
+    }
+  }
+
+  // Sample certificates from the demo university, so anyone can see each verdict without having a signed
+  // document of their own. They were signed on this deployment; "tampered" changes one byte of the valid one.
+  async function trySample(sample: (typeof SAMPLES)[number]) {
+    setError(null)
+    setNotFound(null)
+    setBusy(true)
+    try {
+      const response = await fetch(`/demo/${sample.file}`)
+      if (!response.ok) throw new Error('The sample could not be loaded. Please try again.')
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (sample.tamper) bytes[bytes.length - 20] ^= 1
+      await checkFile(new File([bytes], sample.tamper ? `tampered-${sample.file}` : sample.file, { type: 'application/pdf' }))
+    } catch (e) {
+      setError((e as Error).message)
       setBusy(false)
     }
   }
@@ -89,6 +114,18 @@ function Verify() {
                 Your file stays on this device. Your browser works out its fingerprint (SHA-256) and only that is sent to be looked up.
               </p>
               {busy && <p role="status" className="text-sm text-indigo-600">Checking…</p>}
+              <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                <p className="text-sm font-medium text-slate-900 dark:text-white">No signed document to hand? Try a sample.</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Four certificates from a demo university, one for each verdict.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {SAMPLES.map((sample) => (
+                    <button key={sample.label} type="button" disabled={busy} onClick={() => void trySample(sample)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-indigo-400 hover:text-indigo-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-400 dark:hover:text-indigo-300">
+                      {sample.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           )}
           {tab === 'scan' && <QrScanner onResult={openId} />}
